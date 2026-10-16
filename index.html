@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>음성 → 영/일/중 번역 → 네이티브 낭독</title>
+<style>
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { font-family:-apple-system,"Segoe UI","Malgun Gothic",sans-serif;
+    margin:0; padding:16px; background:#f5f6f8; color:#1f2328; }
+  .wrap { max-width:1080px; margin:0 auto; }
+  h1 { font-size:18px; margin:0 0 14px; }
+  .panel { background:#fff; border:1px solid #e1e4e8; border-radius:10px;
+    padding:16px; margin-bottom:14px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .row + .row { margin-top:10px; padding-top:10px; border-top:1px dashed #e8eaed; }
+  button { padding:11px 15px; font-size:14px; border-radius:8px;
+    border:1px solid #d0d7de; background:#fff; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  #startBtn { background:#2563eb; color:#fff; border-color:#2563eb; }
+  #stopBtn  { background:#dc2626; color:#fff; border-color:#dc2626; }
+  .spk { background:#059669; color:#fff; border-color:#059669; padding:8px 12px; font-size:13px; }
+  select { padding:9px; border-radius:8px; border:1px solid #d0d7de; max-width:100%; }
+  label { font-size:13px; color:#656d76; display:inline-flex; align-items:center; gap:5px; }
+  input[type=range] { width:90px; }
+  .status { margin-left:auto; font-size:13px; color:#656d76; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%;
+    background:#9ca3af; margin-right:5px; }
+  .dot.on { background:#ef4444; animation:pulse 1s infinite; }
+  .dot.speak { background:#10b981; animation:pulse .8s infinite; }
+  @keyframes pulse { 50%{opacity:.25;} }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; }
+  .col h2 { font-size:12px; color:#656d76; margin:0 0 6px; font-weight:600;
+    letter-spacing:.4px; display:flex; align-items:center; gap:6px; }
+  .flag { font-size:14px; }
+  textarea { min-height:150px; width:100%; padding:12px; font-size:15px;
+    line-height:1.7; border:1px solid #e1e4e8; border-radius:8px;
+    resize:vertical; font-family:inherit; }
+  .tgt textarea { background:#f8fafc; }
+  .ctl { display:flex; gap:6px; margin-top:6px; flex-wrap:wrap; align-items:center; }
+  .ctl select { font-size:12px; padding:6px; flex:1; min-width:120px; }
+  .interim { color:#9ca3af; font-style:italic; min-height:22px; margin-top:8px; font-size:14px; }
+  .bar { padding:11px; border-radius:8px; font-size:13px; line-height:1.6;
+    margin-bottom:12px; background:#fff4e5; border:1px solid #ffd8a8; color:#8a4b00; }
+  .bar.ok { background:#e9f7ef; border-color:#a9dfbf; color:#1e6b3f; }
+  .bar.err{ background:#fdecea; border-color:#f5c6cb; color:#8a1c1c; }
+  .engine { font-size:11px; background:#eef2ff; color:#3730a3;
+    padding:3px 8px; border-radius:10px; font-weight:600; }
+  .off { opacity:.35; pointer-events:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>음성 인식 → 영어 · 일본어 · 중국어 번역 → 네이티브 낭독</h1>
+
+  <div class="bar" id="trStatus">엔진 확인 중...</div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="startBtn">● 녹음</button>
+      <button id="stopBtn" disabled>■ 중지</button>
+      <select id="langSel">
+        <option value="ko-KR" data-src="ko">입력: 한국어</option>
+        <option value="en-US" data-src="en">입력: English</option>
+        <option value="ja-JP" data-src="ja">입력: 日本語</option>
+        <option value="zh-CN" data-src="zh">입력: 中文</option>
+      </select>
+      <label><input type="checkbox" id="contChk" checked> 연속</label>
+      <span class="status"><span class="dot" id="dot"></span><span id="statusTxt">대기 중</span></span>
+    </div>
+
+    <div class="row">
+      <strong style="font-size:13px">번역 대상:</strong>
+      <label><input type="checkbox" class="tgtChk" data-t="en" checked> 🇺🇸 English</label>
+      <label><input type="checkbox" class="tgtChk" data-t="ja" checked> 🇯🇵 日本語</label>
+      <label><input type="checkbox" class="tgtChk" data-t="zh" checked> 🇨🇳 中文</label>
+      <span class="engine" id="engineTag">엔진: -</span>
+      <button id="loadLocalBtn" style="display:none">로컬 번역엔진 내려받기</button>
+    </div>
+
+    <div class="row">
+      <label><input type="checkbox" id="autoSpeakChk"> 번역 즉시 자동 낭독</label>
+      <select id="autoSpeakTgt">
+        <option value="en">낭독 언어: English</option>
+        <option value="ja">낭독 언어: 日本語</option>
+        <option value="zh">낭독 언어: 中文</option>
+        <option value="all">낭독: 전체 순차</option>
+      </select>
+      <label>속도 <input type="range" id="rateR" min="0.5" max="1.6" step="0.1" value="1">
+        <span id="rateV">1.0</span></label>
+      <button id="stopSpeakBtn" disabled>■ 낭독중지</button>
+    </div>
+    <div class="interim" id="interim"></div>
+  </div>
+
+  <div class="panel">
+    <div class="grid">
+      <div class="col">
+        <h2><span class="flag">🎙</span> 원문 (SOURCE)</h2>
+        <textarea id="srcOut" placeholder="인식된 텍스트..."></textarea>
+        <div class="ctl">
+          <select id="voice_src"><option>-</option></select>
+          <button class="spk" data-speak="src">🔊</button>
+        </div>
+      </div>
+
+      <div class="col tgt" id="col_en">
+        <h2><span class="flag">🇺🇸</span> ENGLISH</h2>
+        <textarea id="out_en" placeholder="Translation..."></textarea>
+        <div class="ctl">
+          <select id="voice_en"><option>음성 로딩...</option></select>
+          <button class="spk" data-speak="en">🔊 읽기</button>
+        </div>
+      </div>
+
+      <div class="col tgt" id="col_ja">
+        <h2><span class="flag">🇯🇵</span> 日本語</h2>
+        <textarea id="out_ja" placeholder="翻訳結果..."></textarea>
+        <div class="ctl">
+          <select id="voice_ja"><option>音声ロード中...</option></select>
+          <button class="spk" data-speak="ja">🔊 読む</button>
+        </div>
+      </div>
+
+      <div class="col tgt" id="col_zh">
+        <h2><span class="flag">🇨🇳</span> 中文</h2>
+        <textarea id="out_zh" placeholder="翻译结果..."></textarea>
+        <div class="ctl">
+          <select id="voice_zh"><option>语音加载中...</option></select>
+          <button class="spk" data-speak="zh">🔊 朗读</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="border:none; padding-top:12px">
+      <button id="clearBtn">전체 지우기</button>
+      <button id="saveBtn">.txt 저장</button>
+      <button id="retransBtn">전체 재번역</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const synth = window.speechSynthesis;
+const $ = id => document.getElementById(id);
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const TARGETS = ['en','ja','zh'];
+
+const startBtn=$('startBtn'), stopBtn=$('stopBtn'), langSel=$('langSel'),
+      contChk=$('contChk'), srcOut=$('srcOut'), interim=$('interim'),
+      dot=$('dot'), statusTxt=$('statusTxt'), trStatus=$('trStatus'),
+      rateR=$('rateR'), autoSpeakChk=$('autoSpeakChk'), autoSpeakTgt=$('autoSpeakTgt'),
+      stopSpeakBtn=$('stopSpeakBtn'), engineTag=$('engineTag'), loadLocalBtn=$('loadLocalBtn');
+
+const outEl = { en:$('out_en'), ja:$('out_ja'), zh:$('out_zh') };
+const voiceEl= { src:$('voice_src'), en:$('voice_en'), ja:$('voice_ja'), zh:$('voice_zh') };
+
+function setStatus(t,cls){ statusTxt.textContent=t; dot.className='dot'+(cls?' '+cls:''); }
+function bar(m,type){ trStatus.textContent=m; trStatus.className='bar'+(type?' '+type:''); }
+function srcLang(){ return langSel.selectedOptions[0].dataset.src; }
+function activeTargets(){
+  return [...document.querySelectorAll('.tgtChk')]
+    .filter(c=>c.checked).map(c=>c.dataset.t).filter(t=>t!==srcLang());
+}
+
+/* ══════════ 1. TTS — 언어별 네이티브 음성 ══════════ */
+// BCP-47 매칭 규칙 (언어코드 → 허용 locale 정규식 + 선호 locale)
+const TTS_LANG = {
+  en: { re:/^en(-|_|$)/i,                  pref:['en-US','en-GB'], fallback:'en-US' },
+  ja: { re:/^ja(-|_|$)/i,                  pref:['ja-JP'],         fallback:'ja-JP' },
+  zh: { re:/^(zh|cmn)(-|_|$)/i,            pref:['zh-CN','zh-Hans','zh'], fallback:'zh-CN' },
+  ko: { re:/^ko(-|_|$)/i,                  pref:['ko-KR'],         fallback:'ko-KR' },
+  es: { re:/^es(-|_|$)/i,                  pref:['es-ES'],         fallback:'es-ES' }
+};
+// 언어별 고품질 네이티브 음성 이름 힌트
+const VOICE_HINT = {
+  en: /samantha|aria|jenny|guy|alex|daniel|karen|zira|michelle/i,
+  ja: /kyoko|otoya|nanami|ayumi|haruka|o-ren|hattori|sayaka/i,
+  zh: /tingting|ting-ting|xiaoxiao|yunxi|huihui|yaoyao|liangliang|meijia|sinji/i,
+  ko: /yuna|heami|sora|nari/i,
+  es: /monica|paulina|helena|elvira|jorge/i
+};
+
+let allVoices = [];
+const voicesByLang = {};
+
+function scoreVoice(v, lang){
+  const n=v.name.toLowerCase(); let s=0;
+  if(/natural|neural|premium|enhanced|siri/.test(n)) s+=60;   // OS 뉴럴 음성 최우선
+  if(/google/.test(n)) s+=35;                                  // Android 기본 고품질
+  if(VOICE_HINT[lang] && VOICE_HINT[lang].test(v.name)) s+=25; // 알려진 네이티브 음성
+  const cfg=TTS_LANG[lang];
+  if(cfg){
+    const i = cfg.pref.findIndex(p=>v.lang.replace('_','-').toLowerCase()
+                                     .startsWith(p.toLowerCase()));
+    if(i>=0) s += 12 - i*3;
+  }
+  if(/compact|eloquence|espeak/.test(n)) s-=40;                // 저품질 음성 강등
+  return s;
+}
+
+function loadVoices(){
+  if(!synth) return;
+  allVoices = synth.getVoices();
+  if(!allVoices.length) return;
+
+  // 원문 패널 음성은 입력 언어 기준
+  const keys = [...TARGETS, srcLang()];
+  keys.forEach(lang=>{
+    const cfg = TTS_LANG[lang]; if(!cfg) return;
+    const list = allVoices
+      .filter(v=>cfg.re.test(v.lang.replace('_','-')))
+      .sort((a,b)=>scoreVoice(b,lang)-scoreVoice(a,lang));
+    voicesByLang[lang]=list;
+  });
+
+  TARGETS.forEach(t=>fillVoiceSelect(t,t));
+  fillVoiceSelect('src', srcLang());
+}
+
+function fillVoiceSelect(slot, lang){
+  const el = voiceEl[slot]; if(!el) return;
+  const list = voicesByLang[lang] || [];
+  if(!list.length){
+    el.innerHTML = `<option value="-1">(${lang} 음성 없음 — OS에서 추가 필요)</option>`;
+    return;
+  }
+  el.innerHTML = list.map((v,i)=>{
+    const tag = /natural|neural|premium|enhanced/i.test(v.name) ? ' ★' : '';
+    return `<option value="${i}">${v.name} (${v.lang})${tag}</option>`;
+  }).join('');
+  el.dataset.lang = lang;
+}
+
+rateR.addEventListener('input', ()=> $('rateV').textContent=(+rateR.value).toFixed(1));
+
+if(synth){
+  loadVoices();
+  synth.addEventListener('voiceschanged', loadVoices);
+  // iOS는 voiceschanged가 늦거나 안 옴 → 폴링 보강
+  let tries=0;
+  const t=setInterval(()=>{ if(allVoices.length||++tries>20) clearInterval(t); else loadVoices(); },400);
+}
+
+// 낭독 큐 — 언어가 섞여도 순서대로 재생
+const speakQueue=[]; let speaking=false;
+
+function speak(text, lang, slot){
+  if(!synth || !text || !text.trim()) return;
+  speakQueue.push({ text:text.trim(), lang, slot: slot||lang });
+  drain();
+}
+
+function drain(){
+  if(speaking || !speakQueue.length) return;
+  const job = speakQueue.shift();
+  const u = new SpeechSynthesisUtterance(job.text);
+  const list = voicesByLang[job.lang] || [];
+  const idx = +((voiceEl[job.slot]||{}).value ?? -1);
+  const v = list[idx] || list[0];
+
+  if(v){ u.voice=v; u.lang=v.lang; }
+  else  { u.lang = (TTS_LANG[job.lang]||{}).fallback || 'en-US'; }
+
+  u.rate = +rateR.value;
+  u.pitch = 1;
+  u.volume = 1;
+
+  u.onstart = ()=>{ speaking=true; setStatus(`🔊 ${job.lang.toUpperCase()} 낭독 중`,'speak');
+                    stopSpeakBtn.disabled=false; };
+  u.onend = u.onerror = ()=>{
+    speaking=false; stopSpeakBtn.disabled=true;
+    if(speakQueue.length) drain();
+    else setStatus(stopBtn.disabled?'대기 중':'듣는 중...', stopBtn.disabled?'':'on');
+  };
+  synth.speak(u);
+}
+
+// Chrome 장문 중단 버그 방지 핑
+setInterval(()=>{ if(synth&&synth.speaking&&!synth.paused){synth.pause();synth.resume();} },10000);
+
+// 개별 패널 읽기 버튼
+document.querySelectorAll('[data-speak]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const slot = btn.dataset.speak;
+    const lang = slot==='src' ? srcLang() : slot;
+    const text = slot==='src' ? srcOut.value : outEl[slot].value;
+    if(!text.trim()) return;
+    synth.cancel(); speakQueue.length=0; speaking=false;
+    // CJK는 。！？、영문은 .!? 기준 분할
+    const parts = text.match(/[^.!?。！？]+[.!?。！？]*/g) || [text];
+    parts.forEach(p=>speak(p, lang, slot));
+  });
+});
+
+stopSpeakBtn.addEventListener('click', ()=>{
+  speakQueue.length=0; speaking=false; synth.cancel(); stopSpeakBtn.disabled=true;
+});
+
+/* ══════════ 2. 번역 — 내장 API + 로컬 WASM(영어 피벗) ══════════ */
+let builtin = {};           // "ko>ja" → Translator 인스턴스
+let localPipes = {};        // "ko>en" → pipeline
+let transformers = null;
+const hasBuiltin = ('Translator' in self) || ('translation' in self);
+
+// transformers.js 로 직접 지원되는 opus-mt 모델 (없으면 영어 경유)
+const OPUS = {
+  'ko>en':'Xenova/opus-mt-ko-en', 'ja>en':'Xenova/opus-mt-ja-en',
+  'zh>en':'Xenova/opus-mt-zh-en', 'es>en':'Xenova/opus-mt-es-en',
+  'en>zh':'Xenova/opus-mt-en-zh', 'en>jap':'Xenova/opus-mt-en-jap',
+  'en>es':'Xenova/opus-mt-en-es'
+};
+function opusKey(a,b){
+  if(a==='en'&&b==='ja') return 'en>jap';     // 모델 이름이 jap
+  return `${a}>${b}`;
+}
+
+/* ---- (A) 브라우저 내장 Translator ---- */
+async function getBuiltin(src,tgt){
+  if(!hasBuiltin || src===tgt) return null;
+  const key=`${src}>${tgt}`;
+  if(builtin[key]) return builtin[key];
+  try{
+    const API = self.Translator || self.translation;
+    const opts = { sourceLanguage:src, targetLanguage:tgt };
+    const avail = API.availability ? await API.availability(opts) : await API.canTranslate(opts);
+    if(avail==='unavailable'||avail==='no') return null;
+    bar(`내장 모델 ${src}→${tgt} 준비 중...`);
+    builtin[key] = await API.create({ ...opts, monitor(m){
+      m.addEventListener('downloadprogress', e=>
+        bar(`내장 모델 ${src}→${tgt} 다운로드 ${Math.round(e.loaded*100)}%`));
+    }});
+    engineTag.textContent='엔진: 브라우저 내장';
+    bar('내장 Translator 준비 완료 (온디바이스)','ok');
+    return builtin[key];
+  }catch(e){ return null; }
+}
+
+/* ---- (B) 로컬 WASM pipeline ---- */
+async function getLocalPipe(a,b){
+  const key = opusKey(a,b);
+  const model = OPUS[key];
+  if(!model) return null;
+  if(localPipes[key]) return localPipes[key];
+  if(!transformers){
+    bar('로컬 번역 엔진 로딩 중... (라이브러리)');
+    transformers = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3');
+    transformers.env.allowLocalModels = false;
+  }
+  bar(`로컬 모델 ${a}→${b} 다운로드 중... (최초 1회 약 40~80MB)`);
+  localPipes[key] = await transformers.pipeline('translation', model, {
+    dtype:'q8',
+    progress_callback: p=>{
+      if(p.status==='progress' && p.progress!=null)
+        bar(`${a}→${b} 모델 ${p.progress.toFixed(0)}%`);
+    }
+  });
+  engineTag.textContent='엔진: 로컬 WASM';
+  bar(`로컬 엔진 준비 완료 (${a}→${b})`,'ok');
+  return localPipes[key];
+}
+
+async function runLocal(pipe, text){
+  const out = await pipe(text, { max_new_tokens:256 });
+  return Array.isArray(out) ? out[0].translation_text : out.translation_text;
+}
+
+/* ---- 통합 번역: 직접 → 실패 시 영어 피벗 ---- */
+async function translate(text, src, tgt){
+  if(!text.trim() || src===tgt) return text;
+
+  // 1순위: 내장 API 직접 번역
+  const b = await getBuiltin(src,tgt);
+  if(b){ try{ return await b.translate(text); }catch(e){} }
+
+  // 2순위: 로컬 모델 직접 번역
+  try{
+    const p = await getLocalPipe(src,tgt);
+    if(p) return await runLocal(p, text);
+  }catch(e){ console.warn('direct local fail', e); }
+
+  // 3순위: 영어 피벗 (ko→en→ja 등)
+  if(src!=='en' && tgt!=='en'){
+    try{
+      bar(`${src}→${tgt} 직접 모델 없음 → 영어 경유 번역`);
+      const p1 = await getLocalPipe(src,'en');
+      const p2 = await getLocalPipe('en',tgt);
+      if(p1 && p2){
+        const mid = await runLocal(p1, text);
+        return await runLocal(p2, mid);
+      }
+    }catch(e){ console.warn('pivot fail', e); }
+  }
+  return '';
+}
+
+// 번역 큐 — 순서 보장
+let queue = Promise.resolve();
+function enqueue(chunk){
+  queue = queue.then(async ()=>{
+    const src = srcLang();
+    const tgts = activeTargets();
+    const results = {};
+    for(const t of tgts){
+      const r = await translate(chunk, src, t);
+      if(r){
+        results[t]=r;
+        outEl[t].value += (outEl[t].value?' ':'') + r.trim();
+        outEl[t].scrollTop = outEl[t].scrollHeight;
+      }
+    }
+    if(autoSpeakChk.checked){
+      const mode = autoSpeakTgt.value;
+      if(mode==='all') tgts.forEach(t=> results[t] && speak(results[t], t, t));
+      else if(results[mode]) speak(results[mode], mode, mode);
+    }
+  });
+}
+
+/* ---- 엔진 사전 준비 ---- */
+async function prepareEngines(){
+  const src = srcLang();
+  const tgts = activeTargets();
+  for(const t of tgts){
+    const b = await getBuiltin(src,t);
+    if(b) continue;
+    try{
+      if(!(await getLocalPipe(src,t))){
+        await getLocalPipe(src,'en');
+        await getLocalPipe('en',t);
+      }
+    }catch(e){ bar(`${src}→${t} 엔진 준비 실패: ${e.message}`,'err'); }
+  }
+}
+loadLocalBtn.addEventListener('click', prepareEngines);
+
+(function diagnose(){
+  if(hasBuiltin && !isMobile){
+    bar('데스크톱 내장 Translator 사용 가능. 녹음 시작 시 언어별 모델을 준비합니다.','ok');
+    engineTag.textContent='엔진: 브라우저 내장(예정)';
+  }else{
+    bar(isMobile
+      ? '모바일은 Chrome 내장 Translator를 지원하지 않습니다. 「로컬 번역엔진 내려받기」를 누르면 일본어·중국어 포함 전부 기기 내에서 번역됩니다. (Wi-Fi 권장)'
+      : '내장 Translator 미지원 브라우저입니다. 로컬 엔진을 사용하세요.');
+    loadLocalBtn.style.display='inline-block';
+    engineTag.textContent='엔진: 없음';
+  }
+})();
+
+/* ══════════ 3. 음성 인식 ══════════ */
+if(!SR){
+  bar('이 브라우저는 음성 인식(Web Speech API)을 지원하지 않습니다.','err');
+  startBtn.disabled=true;
+}else{
+  let recognition=null, manualStop=false;
+
+  function create(){
+    const r=new SR();
+    r.lang=langSel.value;
+    r.continuous = contChk.checked && !isMobile;
+    r.interimResults=true;
+    r.maxAlternatives=1;
+
+    r.onstart=()=>{ setStatus('듣는 중...','on'); startBtn.disabled=true; stopBtn.disabled=false; };
+
+    r.onresult=e=>{
+      let fin='', itm='';
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const t=e.results[i][0].transcript;
+        if(e.results[i].isFinal) fin+=t; else itm+=t;
+      }
+      if(fin){
+        const chunk=fin.trim();
+        srcOut.value += (srcOut.value?' ':'')+chunk;
+        srcOut.scrollTop=srcOut.scrollHeight;
+        enqueue(chunk);
+      }
+      interim.textContent=itm;
+    };
+
+    r.onerror=e=>{
+      const m={ 'no-speech':'음성이 감지되지 않았습니다.',
+        'audio-capture':'마이크를 찾을 수 없습니다.',
+        'not-allowed':'마이크 권한이 거부되었습니다.',
+        'network':'네트워크 오류' }[e.error] || ('오류: '+e.error);
+      setStatus(m,'');
+      if(e.error==='not-allowed'||e.error==='audio-capture') manualStop=true;
+    };
+
+    r.onend=()=>{
+      interim.textContent='';
+      if(!manualStop && contChk.checked){
+        setTimeout(()=>{ try{ r.start(); }catch(_){} }, isMobile?300:0);
+        return;
+      }
+      if(!speaking) setStatus('대기 중','');
+      startBtn.disabled=false; stopBtn.disabled=true;
+    };
+    return r;
+  }
+
+  startBtn.addEventListener('click', async ()=>{
+    manualStop=false;
+    await prepareEngines();
+    recognition=create();
+    try{ recognition.start(); }
+    catch(err){ setStatus('시작 실패: '+err.message,''); }
+  });
+
+  stopBtn.addEventListener('click', ()=>{ manualStop=true; recognition&&recognition.stop(); });
+
+  langSel.addEventListener('change', ()=>{
+    builtin={};                 // 내장 인스턴스만 초기화 (로컬 모델은 캐시 유지)
+    loadVoices();
+    document.querySelectorAll('.tgtChk').forEach(c=>{
+      c.closest('label').classList.toggle('off', c.dataset.t===srcLang());
+    });
+    if(recognition && !stopBtn.disabled){
+      manualStop=true; recognition.stop();
+      setTimeout(()=>startBtn.click(),400);
+    }
+  });
+}
+
+/* ══════════ 4. 유틸 ══════════ */
+document.querySelectorAll('.tgtChk').forEach(c=>{
+  c.addEventListener('change', ()=>{
+    $('col_'+c.dataset.t).style.display = c.checked ? '' : 'none';
+  });
+});
+
+$('clearBtn').addEventListener('click', ()=>{
+  srcOut.value=''; TARGETS.forEach(t=>outEl[t].value='');
+  interim.textContent=''; speakQueue.length=0; synth&&synth.cancel();
+});
+
+$('saveBtn').addEventListener('click', ()=>{
+  let body='[원문]\n'+srcOut.value+'\n';
+  TARGETS.forEach(t=>{ if(outEl[t].value) body+=`\n[${t.toUpperCase()}]\n${outEl[t].value}\n`; });
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([body],{type:'text/plain;charset=utf-8'}));
+  a.download='transcript_'+Date.now()+'.txt'; a.click(); URL.revokeObjectURL(a.href);
+});
+
+$('retransBtn').addEventListener('click', async ()=>{
+  const text=srcOut.value.trim(); if(!text) return;
+  const src=srcLang();
+  for(const t of activeTargets()){
+    outEl[t].value='';
+    bar(`${t.toUpperCase()} 재번역 중...`);
+    outEl[t].value = await translate(text, src, t) || '(번역 실패)';
+  }
+  bar('재번역 완료','ok');
+});
+</script>
+</body>
+</html>
